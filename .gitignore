@@ -1,0 +1,13 @@
+# Generated outputs
+outputs/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local tool state
+.codex
+.pytest_cache/
+
+# Editor / OS noise
+.DS_Store
