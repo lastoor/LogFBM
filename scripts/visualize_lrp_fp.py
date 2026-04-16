@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
+import numpy as np
+
+
+COLORS = {
+    "fp": "black",
+    "lrp": "#F9B43F",
+    "source_target": "purple",
+}
+
+PATH_EFFECTS = [pe.Stroke(linewidth=3.0, foreground="white"), pe.Normal()]
+
+
+def _load_npz(path: Path) -> dict[str, np.ndarray]:
+    with np.load(path, allow_pickle=True) as data:
+        return {key: data[key] for key in data.files}
+
+
+def _load_npz_dir(path: Path) -> list[tuple[Path, dict[str, np.ndarray]]]:
+    npz_paths = sorted(child for child in path.iterdir() if child.is_file() and child.suffix == ".npz")
+    if not npz_paths:
+        raise FileNotFoundError(f"No .npz files found in input directory: {path}")
+    return [(npz_path, _load_npz(npz_path)) for npz_path in npz_paths]
+
+
+def _require_keys(data: dict[str, np.ndarray], keys: list[str], context: str) -> None:
+    missing = [key for key in keys if key not in data]
+    if missing:
+        missing_str = ", ".join(missing)
+        raise KeyError(f"Missing required keys for {context}: {missing_str}")
+
+
+def _scalar(data: dict[str, np.ndarray], key: str):
+    value = data[key]
+    if np.ndim(value) == 0:
+        return value.item()
+    if np.size(value) == 1:
+        return np.ravel(value)[0].item()
+    raise ValueError(f"Expected scalar value for {key}, got shape {np.shape(value)}")
+
+
+def _build_geometry(data: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    source_x = float(_scalar(data, "source_x"))
+    target_x = float(_scalar(data, "target_x"))
+    source_y_start = int(_scalar(data, "source_y_start"))
+    source_y_end = int(_scalar(data, "source_y_end"))
+
+    source_rows = np.arange(source_y_start, source_y_end, dtype=float)
+    source_xy = np.column_stack([np.full(source_rows.size, source_x, dtype=float), source_rows])
+
+    y_coords = np.asarray(data["y"], dtype=float)
+    target_rows = y_coords.astype(float)
+    target_xy = np.column_stack([np.full(target_rows.size, target_x, dtype=float), target_rows])
+    return source_xy, target_xy
+
+
+def _extent(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float, float]:
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.size < 2 or y.size < 2:
+        raise ValueError("x and y must contain at least two coordinates")
+    dx = float(x[1] - x[0])
+    dy = float(y[1] - y[0])
+    return (float(x[0] - 0.5 * dx), float(x[-1] + 0.5 * dx), float(y[0] - 0.5 * dy), float(y[-1] + 0.5 * dy))
+
+
+def _validate_path(path: np.ndarray, name: str) -> np.ndarray:
+    path = np.asarray(path, dtype=float)
+    if path.ndim != 2 or path.shape[1] != 2:
+        raise ValueError(f"{name} must have shape (N, 2); got {path.shape}")
+    if path.shape[0] < 2:
+        raise ValueError(f"{name} must contain at least 2 points; got {path.shape[0]}")
+    return path
+
+
+def _add_path_overlays(
+    ax: plt.Axes,
+    *,
+    fp: np.ndarray,
+    lrp: np.ndarray,
+    source_xy: np.ndarray,
+    target_xy: np.ndarray,
+    linewidth: float,
+) -> None:
+    ax.plot(
+        source_xy[:, 0],
+        source_xy[:, 1],
+        color=COLORS["source_target"],
+        linewidth=linewidth,
+        linestyle="-",
+        label="Source",
+        path_effects=PATH_EFFECTS,
+        zorder=4,
+    )
+    ax.plot(
+        target_xy[:, 0],
+        target_xy[:, 1],
+        color=COLORS["source_target"],
+        linewidth=linewidth,
+        linestyle="-",
+        label="Target",
+        path_effects=PATH_EFFECTS,
+        zorder=4,
+    )
+    ax.plot(
+        fp[:, 0],
+        fp[:, 1],
+        color=COLORS["fp"],
+        linewidth=linewidth,
+        linestyle="-",
+        label="FP",
+        path_effects=PATH_EFFECTS,
+        zorder=5,
+    )
+    ax.plot(
+        lrp[:, 0],
+        lrp[:, 1],
+        color=COLORS["lrp"],
+        linewidth=linewidth,
+        linestyle="-.",
+        label="LRP",
+        path_effects=PATH_EFFECTS,
+        zorder=5,
+    )
+
+
+def plot_logk_paths(data: dict[str, np.ndarray], *, path_linewidth: float) -> plt.Figure:
+    _require_keys(data, ["x", "y", "logk", "fp", "lrp", "source_x", "target_x", "source_y_start", "source_y_end"], "logk_paths")
+    x = np.asarray(data["x"], dtype=float)
+    y = np.asarray(data["y"], dtype=float)
+    logk = np.asarray(data["logk"], dtype=float)
+    fp = _validate_path(data["fp"], "fp")
+    lrp = _validate_path(data["lrp"], "lrp")
+    source_xy, target_xy = _build_geometry(data)
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(logk, origin="lower", cmap="viridis", interpolation="nearest", extent=_extent(x, y))
+    _add_path_overlays(ax, fp=fp, lrp=lrp, source_xy=source_xy, target_xy=target_xy, linewidth=path_linewidth)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("log K")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("Log-Permeability With FP and LRP")
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    fig.tight_layout()
+    return fig
+
+
+def plot_head_velocity(data: dict[str, np.ndarray], *, path_linewidth: float, stream_density: float) -> plt.Figure:
+    _require_keys(data, ["x", "y", "vx", "vy", "fp", "lrp", "source_x", "target_x", "source_y_start", "source_y_end"], "head_velocity")
+    x = np.asarray(data["x"], dtype=float)
+    y = np.asarray(data["y"], dtype=float)
+    vx = np.asarray(data["vx"], dtype=float)
+    vy = np.asarray(data["vy"], dtype=float)
+    speed = np.hypot(vx, vy)
+    fp = _validate_path(data["fp"], "fp")
+    lrp = _validate_path(data["lrp"], "lrp")
+    source_xy, target_xy = _build_geometry(data)
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(speed, origin="lower", cmap="magma", interpolation="nearest", extent=_extent(x, y))
+    ax.streamplot(x, y, vx, vy, color=(0.0, 0.0, 0.0, 0.35), linewidth=0.8, density=stream_density, arrowsize=0.7)
+    _add_path_overlays(ax, fp=fp, lrp=lrp, source_xy=source_xy, target_xy=target_xy, linewidth=path_linewidth)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label(r"$|\mathbf{v}|$")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("Velocity Magnitude and Streamlines")
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    fig.tight_layout()
+    return fig
+
+
+def plot_travel_time_profiles(data: dict[str, np.ndarray]) -> plt.Figure:
+    _require_keys(
+        data,
+        ["fp_arc_length", "fp_travel_time", "lrp_arc_length", "lrp_pseudo_travel_time"],
+        "travel_time_profiles",
+    )
+    fp_s = np.asarray(data["fp_arc_length"], dtype=float)
+    fp_t = np.asarray(data["fp_travel_time"], dtype=float)
+    lrp_s = np.asarray(data["lrp_arc_length"], dtype=float)
+    lrp_t = np.asarray(data["lrp_pseudo_travel_time"], dtype=float)
+    if fp_s.ndim != 1 or fp_t.ndim != 1 or lrp_s.ndim != 1 or lrp_t.ndim != 1:
+        raise ValueError("Travel-time arrays must be one-dimensional")
+    if fp_s.size < 2 or lrp_s.size < 2:
+        raise ValueError("Travel-time arrays must contain at least 2 samples")
+
+    fig, ax = plt.subplots(figsize=(6, 4.5))
+    ax.plot(fp_s, fp_t, color=COLORS["fp"], linewidth=2.0, label=f"FP final = {fp_t[-1]:.4g}")
+    ax.plot(lrp_s, lrp_t, color=COLORS["lrp"], linewidth=2.0, linestyle="-.", label=f"LRP pseudo final = {lrp_t[-1]:.4g}")
+    ax.set_xlabel("Arc length")
+    ax.set_ylabel("Cumulative travel time")
+    ax.set_title("Travel-Time Profiles Along Paths")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    fig.tight_layout()
+    return fig
+
+
+def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]]) -> plt.Figure:
+    x_values: list[float] = []
+    y_values: list[float] = []
+    for npz_path, data in dataset:
+        _require_keys(data, ["fp_travel_time", "lrp_pseudo_travel_time", "dh"], f"travel_time_comparison ({npz_path.name})")
+        fp_t = np.asarray(data["fp_travel_time"], dtype=float)
+        lrp_t = np.asarray(data["lrp_pseudo_travel_time"], dtype=float)
+        if fp_t.ndim != 1 or lrp_t.ndim != 1 or fp_t.size < 1 or lrp_t.size < 1:
+            raise ValueError(f"Travel-time arrays must be one-dimensional and non-empty in {npz_path}")
+        t_ref = abs(float(_scalar(data, "dh")))
+        if not np.isfinite(t_ref) or t_ref <= 0.0:
+            raise ValueError(f"Dimensionless travel-time reference |dh| must be finite and positive in {npz_path}")
+        x_values.append(float(fp_t[-1]) / t_ref)
+        y_values.append(float(lrp_t[-1]) / t_ref)
+
+    x_arr = np.asarray(x_values, dtype=float)
+    y_arr = np.asarray(y_values, dtype=float)
+    xy_min = float(np.nanmin([np.nanmin(x_arr), np.nanmin(y_arr)]))
+    xy_max = float(np.nanmax([np.nanmax(x_arr), np.nanmax(y_arr)]))
+
+    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+    ax.scatter(x_arr, y_arr, color="#245C69", s=36, alpha=0.8, label=f"{len(dataset)} files")
+    ax.plot([xy_min, xy_max], [xy_min, xy_max], color="0.4", linestyle="--", linewidth=1.2, label="y = x")
+    ax.set_xlabel("Final t_FP / t_ref")
+    ax.set_ylabel("Final t_LRP / t_ref")
+    ax.set_title("Dimensionless Travel-Time Comparison Across Outputs")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    ax.set_xlim(xy_min, xy_max)
+    ax.set_ylim(xy_min, xy_max)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    fig.tight_layout()
+    return fig
+
+
+def plot_computation_time_profiles(data: dict[str, np.ndarray]) -> plt.Figure:
+    _require_keys(
+        data,
+        [
+            "head_solve_time_sec",
+            "velocity_solve_time_sec",
+            "fp_compute_time_sec",
+            "lrp_compute_time_sec",
+            "fp_total_time_sec",
+            "lrp_total_time_sec",
+        ],
+        "computation_time_profiles",
+    )
+    head_solve_time_sec = float(_scalar(data, "head_solve_time_sec"))
+    velocity_solve_time_sec = float(_scalar(data, "velocity_solve_time_sec"))
+    fp_compute_time_sec = float(_scalar(data, "fp_compute_time_sec"))
+    lrp_compute_time_sec = float(_scalar(data, "lrp_compute_time_sec"))
+    fp_total_time_sec = float(_scalar(data, "fp_total_time_sec"))
+    lrp_total_time_sec = float(_scalar(data, "lrp_total_time_sec"))
+
+    labels = [
+        "FP only",
+        "FP + head + velocity",
+        "LRP only",
+        "LRP + head + velocity",
+    ]
+    values = [
+        fp_compute_time_sec,
+        fp_total_time_sec,
+        lrp_compute_time_sec,
+        lrp_total_time_sec,
+    ]
+    colors = [
+        COLORS["fp"],
+        "#6E6E6E",
+        COLORS["lrp"],
+        "#D98A00",
+    ]
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    bars = ax.bar(labels, values, color=colors, edgecolor="black", linewidth=0.8)
+    for bar, value in zip(bars, values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            value,
+            f"{value:.4g}s",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    ax.set_ylabel("Computation time (s)")
+    ax.set_title("Computation Time Comparison")
+    ax.grid(True, axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
+    ax.text(
+        0.02,
+        0.98,
+        f"head = {head_solve_time_sec:.4g}s, velocity = {velocity_solve_time_sec:.4g}s",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=9,
+        bbox={"facecolor": "white", "edgecolor": "black", "alpha": 0.9, "boxstyle": "round,pad=0.25"},
+    )
+    fig.tight_layout()
+    return fig
+
+
+def plot_computation_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]]) -> plt.Figure:
+    x_exc: list[float] = []
+    y_exc: list[float] = []
+    x_inc: list[float] = []
+    y_inc: list[float] = []
+    for npz_path, data in dataset:
+        _require_keys(
+            data,
+            ["fp_compute_time_sec", "lrp_compute_time_sec", "fp_total_time_sec", "lrp_total_time_sec"],
+            f"computation_time_comparison ({npz_path.name})",
+        )
+        x_exc.append(float(_scalar(data, "fp_compute_time_sec")))
+        y_exc.append(float(_scalar(data, "lrp_compute_time_sec")))
+        x_inc.append(float(_scalar(data, "fp_total_time_sec")))
+        y_inc.append(float(_scalar(data, "lrp_total_time_sec")))
+
+    all_values = x_exc + y_exc + x_inc + y_inc
+    line_max = max(max(all_values) * 1.05, 1e-12)
+
+    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+    ax.scatter(x_exc, y_exc, color=COLORS["fp"], s=40, alpha=0.8, label="Exclusive")
+    ax.scatter(x_inc, y_inc, color=COLORS["lrp"], s=40, marker="s", alpha=0.8, label="Inclusive")
+    ax.plot([0.0, line_max], [0.0, line_max], color="0.4", linestyle="--", linewidth=1.2, label="y = x")
+    # ax.set_xlim(0.0, line_max)
+    # ax.set_ylim(0.0, line_max)
+    ax.set_xlabel("t_FP (s)")
+    ax.set_ylabel("t_LRP (s)")
+    ax.set_title("Computation-Time Comparison Across Outputs")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    fig.tight_layout()
+    return fig
+
+
+def _default_output_dir(input_path: Path) -> Path:
+    return input_path.with_name(f"{input_path.stem}_figures")
+
+
+def _default_output_dir_for_dir(input_dir: Path) -> Path:
+    return input_dir
+
+
+def _save_figure(fig: plt.Figure, path: Path, dpi: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _flag_was_explicitly_set(argv: list[str], name: str) -> bool:
+    return f"--{name}" in argv or f"--no-{name}" in argv
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Visualize figures from a generate_lrp_fp.py output .npz file.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--input", help="Input .npz path from generate_lrp_fp.py for per-file figures.")
+    group.add_argument("--input-dir", help="Input directory containing many .npz files for aggregate comparison figures.")
+    parser.add_argument("--output-dir", default=None, help="Output directory for saved figures.")
+    parser.add_argument("--dpi", type=int, default=300)
+    parser.add_argument("--format", choices=("png", "pdf", "svg"), default="png")
+    parser.add_argument("--stream-density", type=float, default=1.0)
+    parser.add_argument("--path-linewidth", type=float, default=2.0)
+    parser.add_argument("--save-logk-paths", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-head-velocity", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-travel-time", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-computation-time", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-travel-time-comparison", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-computation-time-comparison", action=argparse.BooleanOptionalAction, default=True)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    argv = sys.argv[1:]
+    per_file_flags = [
+        "save-logk-paths",
+        "save-head-velocity",
+        "save-travel-time",
+        "save-computation-time",
+    ]
+    aggregate_flags = [
+        "save-travel-time-comparison",
+        "save-computation-time-comparison",
+    ]
+    saved_paths: list[Path] = []
+    if args.input is not None:
+        for flag in aggregate_flags:
+            if not _flag_was_explicitly_set(argv, flag):
+                setattr(args, flag.replace("-", "_"), False)
+        input_path = Path(args.input).expanduser().resolve()
+        if not input_path.is_file():
+            raise FileNotFoundError(f"Input file does not exist: {input_path}")
+        if args.save_travel_time_comparison or args.save_computation_time_comparison:
+            raise ValueError("travel_time_comparison and computation_time_comparison require --input-dir.")
+        output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else _default_output_dir(input_path)
+        data = _load_npz(input_path)
+
+        if not (args.save_logk_paths or args.save_head_velocity or args.save_travel_time or args.save_computation_time):
+            raise ValueError("At least one per-file figure must be enabled for --input mode.")
+
+        if args.save_logk_paths:
+            fig = plot_logk_paths(data, path_linewidth=args.path_linewidth)
+            path = output_dir / f"logk_paths.{args.format}"
+            _save_figure(fig, path, args.dpi)
+            saved_paths.append(path)
+
+        if args.save_head_velocity:
+            fig = plot_head_velocity(data, path_linewidth=args.path_linewidth, stream_density=args.stream_density)
+            path = output_dir / f"head_velocity.{args.format}"
+            _save_figure(fig, path, args.dpi)
+            saved_paths.append(path)
+
+        if args.save_travel_time:
+            fig = plot_travel_time_profiles(data)
+            path = output_dir / f"travel_time_profiles.{args.format}"
+            _save_figure(fig, path, args.dpi)
+            saved_paths.append(path)
+
+        if args.save_computation_time:
+            fig = plot_computation_time_profiles(data)
+            path = output_dir / f"computation_time_profiles.{args.format}"
+            _save_figure(fig, path, args.dpi)
+            saved_paths.append(path)
+    else:
+        for flag in per_file_flags:
+            if not _flag_was_explicitly_set(argv, flag):
+                setattr(args, flag.replace("-", "_"), False)
+        input_dir = Path(args.input_dir).expanduser().resolve()
+        if not input_dir.is_dir():
+            raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
+        if args.save_logk_paths or args.save_head_velocity or args.save_travel_time or args.save_computation_time:
+            raise ValueError("Per-file figures require --input. Use only comparison flags with --input-dir.")
+        if not (args.save_travel_time_comparison or args.save_computation_time_comparison):
+            raise ValueError("At least one aggregate comparison figure must be enabled for --input-dir mode.")
+
+        output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else _default_output_dir_for_dir(input_dir)
+        dataset = _load_npz_dir(input_dir)
+
+        if args.save_travel_time_comparison:
+            fig = plot_travel_time_comparison(dataset)
+            path = output_dir / f"travel_time_comparison.{args.format}"
+            _save_figure(fig, path, args.dpi)
+            saved_paths.append(path)
+
+        if args.save_computation_time_comparison:
+            fig = plot_computation_time_comparison(dataset)
+            path = output_dir / f"computation_time_comparison.{args.format}"
+            _save_figure(fig, path, args.dpi)
+            saved_paths.append(path)
+
+    print(f"Saved {len(saved_paths)} figure(s) to {output_dir}")
+    for path in saved_paths:
+        print(path)
+
+
+if __name__ == "__main__":
+    main()
