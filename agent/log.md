@@ -208,3 +208,27 @@
 - Limitations/follow-up:
   - I validated syntax and aggregate-mode CLI flow only; I did not render the updated scatter plot against a real output directory in this environment.
   - Aggregate travel-time comparison now requires each `.npz` to contain a finite, nonzero `dh`.
+
+## 2026-04-15
+- Agent/tool: Codex (GPT-5)
+- Summary: Updated aggregate `computation_time_comparison` in `scripts/visualize_lrp_fp.py` to annotate the mean LRP-to-FP timing ratios across the loaded `.npz` files for both exclusive and inclusive timing definitions.
+- Files changed:
+  - `scripts/visualize_lrp_fp.py`
+  - `README.md`
+  - `agent/log.md`
+- Validation:
+  - `python -m py_compile scripts/visualize_lrp_fp.py`
+- Limitations/follow-up:
+  - I validated syntax only; I did not render the updated aggregate computation-time figure against a real output directory in this environment.
+
+## 2026-04-17
+- Agent/tool: Codex (GPT-5)
+- Summary: Updated `scripts/generate_lrp_fp.py` so LRP defaults to the Dijkstra solver from `FlowSimulation`, kept FMM available through `--lrp-method fmm`, recorded `lrp_method` in saved `.npz` outputs, and adjusted README dependency/docs text to match the new default.
+- Files changed:
+  - `scripts/generate_lrp_fp.py`
+  - `README.md`
+  - `agent/log.md`
+- Validation:
+  - `python -m py_compile scripts/generate_lrp_fp.py`
+- Limitations/follow-up:
+  - I validated syntax and integration points only; I did not run a full generation job in this environment because it depends on the external `FlowSimulation` and optional `fmm_core` runtime stack.

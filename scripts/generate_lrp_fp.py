@@ -66,6 +66,7 @@ class RunConfig:
     alpha: float
     fbm_c: float | None
     dh: float
+    lrp_method: str
     solver: str
     backend: str
     velocity_location: str
@@ -132,6 +133,7 @@ def _import_flow_modules() -> dict[str, Any]:
     try:
         from simulation import grf_generation as sim_grf
         from simulation import hydraulic as sim_hyd
+        from simulation import path_finding as sim_path_finding
         from simulation import particle_tracking as sim_pt
     except Exception as exc:
         raise RuntimeError(
@@ -142,6 +144,7 @@ def _import_flow_modules() -> dict[str, Any]:
     return {
         "sim_grf": sim_grf,
         "sim_hyd": sim_hyd,
+        "sim_path_finding": sim_path_finding,
         "sim_pt": sim_pt,
     }
 
@@ -387,6 +390,25 @@ def _compute_fmm_path(
         traversable_mask=traversable_mask,
     )
     return path_xy, np.asarray(t_field, dtype=float)
+
+
+def _compute_dijkstra_path(
+    field: np.ndarray,
+    *,
+    geometry: Geometry,
+    sim_path_finding: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    source_region = [(int(row), int(geometry.source_x)) for row in geometry.source_rows]
+    target_region = [(int(row), int(geometry.target_x)) for row in geometry.target_rows]
+    path_xy, _total_resistance, _start_node, _end_node, resistance_map = sim_path_finding.dijkstra_2d_least_resistance(
+        field,
+        source_region,
+        target_region,
+        average="harmonic",
+    )
+    if len(path_xy) < 2:
+        raise RuntimeError("Dijkstra path extraction failed.")
+    return np.asarray(path_xy, dtype=float), np.asarray(resistance_map, dtype=float)
 
 
 def _solve_head_field(sim_hyd: Any, k_field: np.ndarray, x: np.ndarray, y: np.ndarray, dh: float) -> np.ndarray:
@@ -1021,6 +1043,7 @@ def _write_output(
     field_size: int,
     seed: int,
     dh: float,
+    lrp_method: str,
     std: float,
     grf_length_scale: float,
     fbm_alpha: float,
@@ -1052,6 +1075,7 @@ def _write_output(
         field_size=np.array(field_size),
         seed=np.array(seed),
         dh=np.array(dh),
+        lrp_method=np.array(lrp_method),
         grf_std=np.array(std),
         grf_length_scale=np.array(grf_length_scale),
         fbm_alpha=np.array(fbm_alpha),
@@ -1091,13 +1115,10 @@ def _run_single_seed(
     batch_mode: bool,
 ) -> Path:
     flow_modules = _get_flow_modules()
-    fmm_modules = _get_fmm_modules()
     sim_grf = flow_modules["sim_grf"]
     sim_hyd = flow_modules["sim_hyd"]
+    sim_path_finding = flow_modules["sim_path_finding"]
     sim_pt = flow_modules["sim_pt"]
-    fast_marching_2d_regions = fmm_modules["fast_marching_2d_regions"]
-    extract_path_source_to_target = fmm_modules["extract_path_source_to_target"]
-    extract_path_continuous = fmm_modules["extract_path_continuous"]
 
     geometry = default_geometry(config.field_size)
     x = geometry.x
@@ -1147,16 +1168,26 @@ def _run_single_seed(
 
     lrp_speed = k_field * dh_mean
     t_lrp_start = time.perf_counter()
-    lrp, _t_lrp = _compute_fmm_path(
-        lrp_speed,
-        geometry=geometry,
-        grid_spacing=1.0,
-        fast_marching_2d_regions=fast_marching_2d_regions,
-        extract_path_source_to_target=extract_path_source_to_target,
-        extract_path_continuous=extract_path_continuous,
-        backtracking=config.fmm_backtracking,
-        continuous_step_size=config.fmm_continuous_step_size,
-    )
+    if config.lrp_method == "dijkstra":
+        lrp, _t_lrp = _compute_dijkstra_path(
+            lrp_speed,
+            geometry=geometry,
+            sim_path_finding=sim_path_finding,
+        )
+    elif config.lrp_method == "fmm":
+        fmm_modules = _get_fmm_modules()
+        lrp, _t_lrp = _compute_fmm_path(
+            lrp_speed,
+            geometry=geometry,
+            grid_spacing=1.0,
+            fast_marching_2d_regions=fmm_modules["fast_marching_2d_regions"],
+            extract_path_source_to_target=fmm_modules["extract_path_source_to_target"],
+            extract_path_continuous=fmm_modules["extract_path_continuous"],
+            backtracking=config.fmm_backtracking,
+            continuous_step_size=config.fmm_continuous_step_size,
+        )
+    else:
+        raise ValueError(f"Unsupported LRP method: {config.lrp_method!r}")
     lrp_compute_time_sec = float(time.perf_counter() - t_lrp_start)
 
     t_fp_start = time.perf_counter()
@@ -1198,6 +1229,7 @@ def _run_single_seed(
         field_size=config.field_size,
         seed=seed,
         dh=config.dh,
+        lrp_method=config.lrp_method,
         std=config.std,
         grf_length_scale=grf_length_scale,
         fbm_alpha=fbm_alpha,
@@ -1244,7 +1276,6 @@ def _batch_worker_initializer(queue_gpu: Any, result_dict: Any) -> None:
     global_queue_gpu = queue_gpu
     global_result_dict = result_dict
     _get_flow_modules()
-    _get_fmm_modules()
 
 
 def _run_batch_job(job: tuple[RunConfig, int, str, VisualizationConfig, bool]) -> dict[str, Any]:
@@ -1477,6 +1508,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-mc", type=int, default=None, help="Batch mode convenience option: number of Monte Carlo seeds to run.")
     parser.add_argument("--seed-start", type=int, default=0, help="Batch mode convenience option: first seed used with --num-mc.")
     parser.add_argument("--dh", type=float, default=1.0)
+    parser.add_argument("--lrp-method", choices=("dijkstra", "fmm"), default="dijkstra")
     parser.add_argument("--solver", choices=("rk45", "pollock"), default="rk45")
     parser.add_argument("--backend", choices=("cpu", "gpu"), default="cpu")
     parser.add_argument("--velocity-location", choices=("cell", "face"), default="cell")
@@ -1552,6 +1584,7 @@ def main() -> None:
         alpha=args.fbm_alpha,
         fbm_c=args.fbm_c,
         dh=args.dh,
+        lrp_method=args.lrp_method,
         solver=args.solver,
         backend=args.backend,
         velocity_location=args.velocity_location,

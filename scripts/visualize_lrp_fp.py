@@ -228,14 +228,14 @@ def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]
     x_arr = np.asarray(x_values, dtype=float)
     y_arr = np.asarray(y_values, dtype=float)
     xy_min = float(np.nanmin([np.nanmin(x_arr), np.nanmin(y_arr)]))
-    xy_max = float(np.nanmax([np.nanmax(x_arr), np.nanmax(y_arr)]))
+    xy_max = 1e4 #float(np.nanmax([np.nanmax(x_arr), np.nanmax(y_arr)]))
 
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
     ax.scatter(x_arr, y_arr, color="#245C69", s=36, alpha=0.8, label=f"{len(dataset)} files")
     ax.plot([xy_min, xy_max], [xy_min, xy_max], color="0.4", linestyle="--", linewidth=1.2, label="y = x")
-    ax.set_xlabel("Final t_FP / t_ref")
-    ax.set_ylabel("Final t_LRP / t_ref")
-    ax.set_title("Dimensionless Travel-Time Comparison Across Outputs")
+    ax.set_xlabel(r"$t_{\min}^{\text{FP}} / t_{\text{ref}}$")
+    ax.set_ylabel(r"$t_{\min}^{\text{LRP}} / t_{\text{ref}}$")
+    # ax.set_title("First Arrival-Time Comparison")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
     ax.set_xlim(xy_min, xy_max)
@@ -333,17 +333,34 @@ def plot_computation_time_comparison(dataset: list[tuple[Path, dict[str, np.ndar
 
     all_values = x_exc + y_exc + x_inc + y_inc
     line_max = max(max(all_values) * 1.05, 1e-12)
+    mean_ratio_exc = float(np.mean(y_exc) / np.mean(x_exc))
+    mean_ratio_inc = float(np.mean(y_inc) / np.mean(x_inc))
 
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
-    ax.scatter(x_exc, y_exc, color=COLORS["fp"], s=40, alpha=0.8, label="Exclusive")
-    ax.scatter(x_inc, y_inc, color=COLORS["lrp"], s=40, marker="s", alpha=0.8, label="Inclusive")
+    ax.scatter(x_exc, y_exc, color=COLORS["fp"], s=40, alpha=0.8, label="Self: "+rf"$\mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{LRP}}}}] / \mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{FP}}}}] = {mean_ratio_exc:.4g}$")
+    ax.scatter(x_inc, y_inc, color=COLORS["lrp"], s=40, marker="s", alpha=0.8, label="With velocity field solving: "+rf"$\mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{LRP}}}}] / \mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{FP}}}}] = {mean_ratio_inc:.4g}$")
     ax.plot([0.0, line_max], [0.0, line_max], color="0.4", linestyle="--", linewidth=1.2, label="y = x")
     # ax.set_xlim(0.0, line_max)
     # ax.set_ylim(0.0, line_max)
-    ax.set_xlabel("t_FP (s)")
-    ax.set_ylabel("t_LRP (s)")
-    ax.set_title("Computation-Time Comparison Across Outputs")
+    ax.set_xlabel(r"$t_{\text{compute}}^{\text{FP}}$ (s)")
+    ax.set_ylabel(r"$t_{\text{compute}}^{\text{LRP}}$ (s)")
+    # ax.set_title("Computation-Time Comparison")
     ax.grid(True, alpha=0.25)
+    # ax.text(
+    #     0.02,
+    #     0.78,
+    #     "\n".join(
+    #         [
+    #             rf"$\mathrm{{mean}}(t_{{\mathrm{{LRP}}}}) / \mathrm{{mean}}(t_{{\mathrm{{FP}}}}) = {mean_ratio_exc:.4g}$",
+    #             rf"$\mathrm{{mean}}(t_{{\mathrm{{LRP,total}}}}) / \mathrm{{mean}}(t_{{\mathrm{{FP,total}}}}) = {mean_ratio_inc:.4g}$",
+    #         ]
+    #     ),
+    #     transform=ax.transAxes,
+    #     ha="left",
+    #     va="top",
+    #     fontsize=9,
+    #     bbox={"facecolor": "white", "edgecolor": "black", "alpha": 0.9, "boxstyle": "round,pad=0.25"},
+    # )
     ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
     ax.set_xscale("log")
     ax.set_yscale("log")

@@ -2,17 +2,17 @@
 set -euo pipefail
 
 field_type="fbm"           # Options: expcov, fbm
-field_size="100"
+field_size="1000"
 std=""
 length_scale="0.2"         # Used for expcov
-fbm_alpha="0.5"            # Used for fbm
+fbm_alpha="0.1"            # Used for fbm
 fbm_c="0.027"                   # Optional fBm c override; leave empty to auto-derive from alpha/std
 num_mc="1000"
 seed_start="2026"
 dh="1.0"
 
 solver="pollock"              # Options: rk45, pollock
-backend="gpu"              # Options: cpu, gpu
+backend="cpu"              # Options: cpu, gpu
 velocity_location="face"   # Options: cell, face
 align_with_modflow="false"
 density_particle="2"
@@ -40,7 +40,7 @@ visualize_travel_time="true"
 visualize_computation_time="true"
 
 run_tag="generate_lrp_fp"
-time="00:10:00"
+time="12:00:00"
 cpus_per_task="8"
 mem_per_cpu="2GB"
 gpus_per_task="1"
@@ -49,7 +49,7 @@ gpu_device=""                # Leave empty to use the first visible GPU token.
 failure_policy="retry"       # Options: retry, skip
 
 account="fbarros_324"
-partition="gpu"
+partition="main" # Options: main, gpu
 
 repo_root="/home1/binhaoli/LogFBM"
 output_root_base="/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time"

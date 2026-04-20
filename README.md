@@ -12,7 +12,7 @@ All implementation logic lives in the standalone scripts.
 
 ## Repository Layout
 
-- `scripts/generate_lrp_fp.py`: single-run and seed-batch generation, Darcy solve, particle tracking, FMM path extraction, `.npz` output, optional post-save visualization
+- `scripts/generate_lrp_fp.py`: single-run and seed-batch generation, Darcy solve, particle tracking, Dijkstra- or FMM-based LRP extraction, `.npz` output, optional post-save visualization
 - `scripts/visualize_lrp_fp.py`: figure generation from a saved `.npz`
 - `scripts/submit_generate_lrp_fp.sh`: SLURM submission wrapper for batch runs
 - `outputs/`: generated `.npz`, figures, and SLURM logs
@@ -31,7 +31,8 @@ All implementation logic lives in the standalone scripts.
   - hydraulic head solve
   - velocity computation
   - particle tracking
-- `FMM_FastestPath/Algorithm/src/fmm_core` is used only for the LRP FMM solve
+  - Dijkstra-based LRP solve
+- `FMM_FastestPath/Algorithm/src/fmm_core` is optional and used only for `--lrp-method fmm`
 
 Environment overrides:
 
@@ -58,6 +59,8 @@ python scripts/generate_lrp_fp.py \
   --seed 42 \
   --output outputs/test_fbm.npz
 ```
+
+The default LRP method is Dijkstra. Use `--lrp-method fmm` to switch back to the FMM solver.
 
 Run a batch over several seeds and write one `.npz` per seed:
 
@@ -109,6 +112,7 @@ The submission wrapper keeps the code checkout path (`repo_root`) separate from 
 `generate_lrp_fp.py` saves one `.npz` per sample with:
 
 - metadata: field type, seed, field size, `dh`, GRF/fBm parameters
+- LRP metadata: `lrp_method`
 - fields: `logk`, `h`, `vx`, `vy`
 - paths: `fp`, `lrp`
 - path summaries: `fp_arc_length`, `fp_travel_time`, `lrp_arc_length`, `lrp_pseudo_travel_time`
@@ -143,7 +147,7 @@ If `--visualize-output-dir` is set in batch mode, one subdirectory per sample is
 Computation-time definitions:
 
 - FP computation time is particle-tracking time only
-- LRP computation time is FMM time only
+- LRP computation time is the selected LRP solver time only
 - head and velocity solve times are recorded separately
 - inclusive totals add head and velocity solve times to FP or LRP for comparison
 
@@ -151,9 +155,13 @@ Aggregate comparison figures:
 
 - `python scripts/visualize_lrp_fp.py --input-dir <dir>` scans all `.npz` files directly inside the directory
 - `travel_time_comparison` is a scatter plot with one point per `.npz`, using final dimensionless travel times `t_FP / t_ref` versus `t_LRP / t_ref`, where `t_ref = |dh|` is derived from each `.npz`
-- `computation_time_comparison` is a scatter plot with one point per `.npz` for exclusive timing and one point per `.npz` for inclusive timing, with a `y=x` reference line
+- `computation_time_comparison` is a scatter plot with one point per `.npz` for exclusive timing and one point per `.npz` for inclusive timing, with a `y=x` reference line and aggregate mean-ratio annotations `mean(t_LRP)/mean(t_FP)` for both timing definitions
 
 ## Visualization Options
+
+```bash
+python scripts/visualize_lrp_fp.py --input-dir /project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto --output-dir=outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto  --save-travel-time-comparison --save-computation-time-comparison
+```
 
 `generate_lrp_fp.py` can forward figure settings to `visualize_lrp_fp.py`:
 
@@ -199,10 +207,11 @@ fBm controls:
 - `--fbm-alpha` sets the Hurst-related exponent
 - `--fbm-c` optionally overrides the scale parameter used by the fBm generator
 - if `--fbm-c` is not provided, the script computes it from `--fbm-alpha` and `--std`
+- `--lrp-method {dijkstra,fmm}` selects the LRP solver, with Dijkstra as the default
 
-When batch mode runs with `--backend gpu`, the script uses FMM-style CPU/GPU orchestration:
+When batch mode runs with `--backend gpu`, the script uses CPU/GPU orchestration:
 
-- a CPU `multiprocessing.Pool` handles field generation, head solve, FMM/LRP, travel-time postprocessing, and output writing
+- a CPU `multiprocessing.Pool` handles field generation, head solve, LRP solving, travel-time postprocessing, and output writing
 - a persistent GPU worker process handles Pollock particle tracking requests
 - large particle-tracking arrays are transferred through shared memory
 - compatible GPU tasks are batched and reuse a persistent Pollock tracker
@@ -222,7 +231,8 @@ Batch resource controls:
 
 ## Notes
 
-- `generate_lrp_fp.py` requires `FlowSimulation` plus the FMM core source tree to be available at runtime.
-- If `petsc4py`, `FlowSimulation`, or `fmm_core` are missing, generation will fail before `.npz` output is produced.
+- `generate_lrp_fp.py` requires `FlowSimulation` at runtime.
+- `fmm_core` is required only when `--lrp-method fmm` is used.
+- If `petsc4py` or `FlowSimulation` are missing, generation will fail before `.npz` output is produced.
 - Batch GPU mode additionally requires a visible CUDA device and the FlowSimulation Pollock GPU dependencies.
 - `visualize_lrp_fp.py` works only from an already generated `.npz` and does not require rerunning the solver.
