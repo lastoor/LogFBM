@@ -11,6 +11,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
+from matplotlib.ticker import LogFormatterMathtext, LogLocator, MultipleLocator
 import numpy as np
 
 
@@ -21,6 +22,28 @@ COLORS = {
 }
 
 PATH_EFFECTS = [pe.Stroke(linewidth=3.0, foreground="white"), pe.Normal()]
+
+def configure_style():
+    import glob
+    import matplotlib.font_manager as fm
+
+    family: str = "CMU Sans Serif"
+    mathtext_fontset: str = "cm"
+    unicode_minus: bool = False
+    cmu_font_glob: str = "/home1/binhaoli/.local/share/fonts/cmun*.ttf"
+
+    for path in glob.glob(cmu_font_glob):
+        fm.fontManager.addfont(path)
+    plt.rcParams["font.family"] = family
+    plt.rcParams["mathtext.fontset"] = mathtext_fontset
+    plt.rcParams["axes.unicode_minus"] = unicode_minus
+
+    plt.rcParams["font.size"] = 14
+    plt.rcParams["axes.labelsize"] = 16
+    plt.rcParams["axes.titlesize"] = 16
+    plt.rcParams["xtick.labelsize"] = 13
+    plt.rcParams["ytick.labelsize"] = 13
+    plt.rcParams["legend.fontsize"] = 12
 
 
 def _load_npz(path: Path) -> dict[str, np.ndarray]:
@@ -228,20 +251,23 @@ def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]
     x_arr = np.asarray(x_values, dtype=float)
     y_arr = np.asarray(y_values, dtype=float)
     xy_min = float(np.nanmin([np.nanmin(x_arr), np.nanmin(y_arr)]))
-    xy_max = 1e4 #float(np.nanmax([np.nanmax(x_arr), np.nanmax(y_arr)]))
+    xy_max = float(np.nanmax([np.nanmax(x_arr), np.nanmax(y_arr)]))
 
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
-    ax.scatter(x_arr, y_arr, color="#245C69", s=36, alpha=0.8, label=f"{len(dataset)} files")
-    ax.plot([xy_min, xy_max], [xy_min, xy_max], color="0.4", linestyle="--", linewidth=1.2, label="y = x")
+    ax.scatter(x_arr, y_arr, color="#444444", s=36, alpha=0.5, linewidths=0) #, label=f"{len(dataset)} files")
+    ax.plot([xy_min, xy_max], [xy_min, xy_max], color="0.4", linestyle="--", linewidth=1.2) #, label="$y = x$")
     ax.set_xlabel(r"$t_{\min}^{\text{FP}} / t_{\text{ref}}$")
     ax.set_ylabel(r"$t_{\min}^{\text{LRP}} / t_{\text{ref}}$")
     # ax.set_title("First Arrival-Time Comparison")
     ax.grid(True, alpha=0.25)
-    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    # ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
     ax.set_xlim(xy_min, xy_max)
     ax.set_ylim(xy_min, xy_max)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
+    ax.xaxis.set_major_locator(MultipleLocator(25))
+    ax.yaxis.set_major_locator(MultipleLocator(25))
+    ax.set_aspect("equal", adjustable="box")
+    # ax.set_xscale("log")
+    # ax.set_yscale("log")
     fig.tight_layout()
     return fig
 
@@ -315,57 +341,123 @@ def plot_computation_time_profiles(data: dict[str, np.ndarray]) -> plt.Figure:
     return fig
 
 
-def plot_computation_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]]) -> plt.Figure:
-    x_exc: list[float] = []
-    y_exc: list[float] = []
-    x_inc: list[float] = []
-    y_inc: list[float] = []
+def _collect_computation_times(
+    dataset: list[tuple[Path, dict[str, np.ndarray]]],
+    components: str,
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    """Return (x_self, y_self, x_total, y_total) based on the requested components."""
+    required: list[str] = []
+    if components in ("self", "both"):
+        required += ["fp_compute_time_sec", "lrp_compute_time_sec"]
+    if components in ("total", "both"):
+        required += ["fp_total_time_sec", "lrp_total_time_sec"]
+    x_self: list[float] = []
+    y_self: list[float] = []
+    x_total: list[float] = []
+    y_total: list[float] = []
     for npz_path, data in dataset:
-        _require_keys(
-            data,
-            ["fp_compute_time_sec", "lrp_compute_time_sec", "fp_total_time_sec", "lrp_total_time_sec"],
-            f"computation_time_comparison ({npz_path.name})",
-        )
-        x_exc.append(float(_scalar(data, "fp_compute_time_sec")))
-        y_exc.append(float(_scalar(data, "lrp_compute_time_sec")))
-        x_inc.append(float(_scalar(data, "fp_total_time_sec")))
-        y_inc.append(float(_scalar(data, "lrp_total_time_sec")))
+        _require_keys(data, required, f"computation_time_comparison ({npz_path.name})")
+        if components in ("self", "both"):
+            x_self.append(float(_scalar(data, "fp_compute_time_sec")))
+            y_self.append(float(_scalar(data, "lrp_compute_time_sec")))
+        if components in ("total", "both"):
+            x_total.append(float(_scalar(data, "fp_total_time_sec")))
+            y_total.append(float(_scalar(data, "lrp_total_time_sec")))
+    return x_self, y_self, x_total, y_total
 
-    all_values = x_exc + y_exc + x_inc + y_inc
+
+def plot_computation_time_comparison_scatter(
+    dataset: list[tuple[Path, dict[str, np.ndarray]]],
+    *,
+    components: str = "both",
+) -> plt.Figure:
+    x_self, y_self, x_total, y_total = _collect_computation_times(dataset, components)
+
+    all_values = x_self + y_self + x_total + y_total
     line_max = max(max(all_values) * 1.05, 1e-12)
-    mean_ratio_exc = float(np.mean(y_exc) / np.mean(x_exc))
-    mean_ratio_inc = float(np.mean(y_inc) / np.mean(x_inc))
 
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
-    ax.scatter(x_exc, y_exc, color=COLORS["fp"], s=40, alpha=0.8, label="Self: "+rf"$\mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{LRP}}}}] / \mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{FP}}}}] = {mean_ratio_exc:.4g}$")
-    ax.scatter(x_inc, y_inc, color=COLORS["lrp"], s=40, marker="s", alpha=0.8, label="With velocity field solving: "+rf"$\mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{LRP}}}}] / \mathbb{{E}}[t_{{\text{{compute}}}}^{{\text{{FP}}}}] = {mean_ratio_inc:.4g}$")
+    if x_self:
+        mean_ratio_self = float(np.mean(y_self) / np.mean(x_self))
+        ax.scatter(x_self, y_self, color=COLORS["fp"], s=40, alpha=0.8,
+                   label="Self: " + rf"$\mathbb{{E}}[t_{{\text{{LRP}}}}] / \mathbb{{E}}[t_{{\text{{FP}}}}] = {mean_ratio_self:.4g}$")
+    if x_total:
+        mean_ratio_total = float(np.mean(y_total) / np.mean(x_total))
+        ax.scatter(x_total, y_total, color=COLORS["lrp"], s=40, marker="s", alpha=0.8,
+                   label="With velocity field solving: " + rf"$\mathbb{{E}}[t_{{\text{{LRP}}}}] / \mathbb{{E}}[t_{{\text{{FP}}}}] = {mean_ratio_total:.4g}$")
     ax.plot([0.0, line_max], [0.0, line_max], color="0.4", linestyle="--", linewidth=1.2, label="y = x")
-    # ax.set_xlim(0.0, line_max)
-    # ax.set_ylim(0.0, line_max)
     ax.set_xlabel(r"$t_{\text{compute}}^{\text{FP}}$ (s)")
     ax.set_ylabel(r"$t_{\text{compute}}^{\text{LRP}}$ (s)")
-    # ax.set_title("Computation-Time Comparison")
     ax.grid(True, alpha=0.25)
-    # ax.text(
-    #     0.02,
-    #     0.78,
-    #     "\n".join(
-    #         [
-    #             rf"$\mathrm{{mean}}(t_{{\mathrm{{LRP}}}}) / \mathrm{{mean}}(t_{{\mathrm{{FP}}}}) = {mean_ratio_exc:.4g}$",
-    #             rf"$\mathrm{{mean}}(t_{{\mathrm{{LRP,total}}}}) / \mathrm{{mean}}(t_{{\mathrm{{FP,total}}}}) = {mean_ratio_inc:.4g}$",
-    #         ]
-    #     ),
-    #     transform=ax.transAxes,
-    #     ha="left",
-    #     va="top",
-    #     fontsize=9,
-    #     bbox={"facecolor": "white", "edgecolor": "black", "alpha": 0.9, "boxstyle": "round,pad=0.25"},
-    # )
     ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
     ax.set_xscale("log")
     ax.set_yscale("log")
     fig.tight_layout()
     return fig
+
+
+def plot_computation_time_comparison_histogram(
+    dataset: list[tuple[Path, dict[str, np.ndarray]]],
+    *,
+    components: str = "both",
+) -> plt.Figure:
+    x_self, y_self, x_total, y_total = _collect_computation_times(dataset, components)
+
+    series: list[tuple[np.ndarray, str, str]] = []
+    if x_self:
+        ratios = np.asarray(y_self, dtype=float) / np.asarray(x_self, dtype=float)
+        series.append((ratios, "#444444", rf"Self ($\mu={np.mean(ratios):.3g}$)"))
+    if x_total:
+        ratios = np.asarray(y_total, dtype=float) / np.asarray(x_total, dtype=float)
+        series.append((ratios, "#111111", rf"With velocity field solving ($\mu={np.mean(ratios):.3g}$)"))
+
+    all_ratios = np.concatenate([s[0] for s in series])
+    bins = np.logspace(np.log10(np.nanmin(all_ratios) * 0.9), np.log10(np.nanmax(all_ratios) * 1.1), 30)
+
+    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+    for ratios_arr, color, label in series:
+        weights = np.ones_like(ratios_arr, dtype=float) / ratios_arr.size
+        ax.hist(
+            ratios_arr,
+            bins=bins,
+            weights=weights,
+            color=color,
+            alpha=0.6,
+            edgecolor=color,
+            linewidth=0,
+        ) #, label=label)
+        mean_ratio = np.mean(ratios_arr)
+        ax.axvline(mean_ratio, color="#000000", linestyle="--", linewidth=2.0, label=f"Mean: {mean_ratio:.3g}")
+    ax.set_xlabel(r"$t_{\text{compute}}^{\text{LRP}} / t_{\text{compute}}^{\text{FP}}$")
+    ax.set_ylabel("Frequency")
+    ax.set_xscale("log")
+    ax.xaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
+    ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+    ax.xaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
+    ax.grid(True, which="major", alpha=0.8)
+    ax.grid(True, which="minor", alpha=0.6)
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    fig.tight_layout()
+    return fig
+
+
+def plot_computation_time_comparison(
+    dataset: list[tuple[Path, dict[str, np.ndarray]]],
+    *,
+    style: str = "scatter",
+    components: str = "both",
+) -> list[tuple[str, plt.Figure]]:
+    """Return a list of (stem_suffix, figure) pairs (one per style requested)."""
+    styles = ("scatter", "histogram") if style == "both" else (style,)
+    results: list[tuple[str, plt.Figure]] = []
+    for s in styles:
+        suffix = f"_{s}" if style == "both" else ""
+        if s == "histogram":
+            fig = plot_computation_time_comparison_histogram(dataset, components=components)
+        else:
+            fig = plot_computation_time_comparison_scatter(dataset, components=components)
+        results.append((suffix, fig))
+    return results
 
 
 def _default_output_dir(input_path: Path) -> Path:
@@ -402,11 +494,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-computation-time", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-travel-time-comparison", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-computation-time-comparison", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--computation-time-comparison-style",
+        choices=("scatter", "histogram", "both"),
+        default="scatter",
+        help="Plot style for computation-time comparison: scatter (default), histogram of LRP/FP ratios, or both (saves two separate figures).",
+    )
+    parser.add_argument(
+        "--computation-time-comparison-components",
+        choices=("self", "total", "both"),
+        default="both",
+        help="Which timing components to include: self (path-finding only), total (including velocity-field solving), or both (default).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    configure_style()
     argv = sys.argv[1:]
     per_file_flags = [
         "save-logk-paths",
@@ -479,10 +584,14 @@ def main() -> None:
             saved_paths.append(path)
 
         if args.save_computation_time_comparison:
-            fig = plot_computation_time_comparison(dataset)
-            path = output_dir / f"computation_time_comparison.{args.format}"
-            _save_figure(fig, path, args.dpi)
-            saved_paths.append(path)
+            for suffix, fig in plot_computation_time_comparison(
+                dataset,
+                style=args.computation_time_comparison_style,
+                components=args.computation_time_comparison_components,
+            ):
+                path = output_dir / f"computation_time_comparison{suffix}.{args.format}"
+                _save_figure(fig, path, args.dpi)
+                saved_paths.append(path)
 
     print(f"Saved {len(saved_paths)} figure(s) to {output_dir}")
     for path in saved_paths:

@@ -160,7 +160,7 @@ Aggregate comparison figures:
 ## Visualization Options
 
 ```bash
-python scripts/visualize_lrp_fp.py --input-dir /project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto --output-dir=outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto  --save-travel-time-comparison --save-computation-time-comparison
+python scripts/visualize_lrp_fp.py --input-dir /project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto --save-computation-time-comparison --computation-time-comparison-style histogram --computation-time-comparison-components self --output-dir /home1/binhaoli/LogFBM/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto
 ```
 
 `generate_lrp_fp.py` can forward figure settings to `visualize_lrp_fp.py`:
