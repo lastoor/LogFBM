@@ -30,10 +30,12 @@ def configure_style():
     family: str = "CMU Sans Serif"
     mathtext_fontset: str = "cm"
     unicode_minus: bool = False
-    cmu_font_glob: str = "/home1/binhaoli/.local/share/fonts/cmun*.ttf"
+    cmu_font_glob: list = ["/home1/binhaoli/.local/share/fonts/cmun*.ttf", "/Users/binhaoli/Library/Fonts/cmun*.ttf"]
 
-    for path in glob.glob(cmu_font_glob):
-        fm.fontManager.addfont(path)
+    for paths in cmu_font_glob:
+        for path in glob.glob(paths):
+            fm.fontManager.addfont(path)
+            
     plt.rcParams["font.family"] = family
     plt.rcParams["mathtext.fontset"] = mathtext_fontset
     plt.rcParams["axes.unicode_minus"] = unicode_minus
@@ -460,6 +462,38 @@ def plot_computation_time_comparison(
     return results
 
 
+def plot_first_arrival_plume(data: dict[str, np.ndarray], *, path_linewidth: float) -> plt.Figure:
+    _require_keys(
+        data,
+        ["x", "y", "logk", "fp", "lrp", "plume_x", "plume_y",
+         "source_x", "target_x", "source_y_start", "source_y_end"],
+        "first_arrival_plume",
+    )
+    x = np.asarray(data["x"], dtype=float)
+    y = np.asarray(data["y"], dtype=float)
+    logk = np.asarray(data["logk"], dtype=float)
+    plume_x = np.asarray(data["plume_x"], dtype=float).ravel()
+    plume_y = np.asarray(data["plume_y"], dtype=float).ravel()
+    fp = _validate_path(data["fp"], "fp")
+    lrp = _validate_path(data["lrp"], "lrp")
+    source_xy, target_xy = _build_geometry(data)
+    mask = np.isfinite(plume_x) & np.isfinite(plume_y)
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.imshow(logk, origin="lower", cmap="viridis", interpolation="nearest",
+              extent=_extent(x, y), alpha=0.7)
+    ax.scatter(plume_x[mask], plume_y[mask], s=6, color="white",
+               linewidths=0, rasterized=True, label="Plume", zorder=3)
+    _add_path_overlays(ax, fp=fp, lrp=lrp, source_xy=source_xy,
+                       target_xy=target_xy, linewidth=path_linewidth)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title("FP First Arrival Plume")
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    fig.tight_layout()
+    return fig
+
+
 def _default_output_dir(input_path: Path) -> Path:
     return input_path.with_name(f"{input_path.stem}_figures")
 
@@ -492,6 +526,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-head-velocity", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-travel-time", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-computation-time", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--save-first-arrival-plume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-travel-time-comparison", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-computation-time-comparison", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
@@ -518,6 +553,7 @@ def main() -> None:
         "save-head-velocity",
         "save-travel-time",
         "save-computation-time",
+        "save-first-arrival-plume",
     ]
     aggregate_flags = [
         "save-travel-time-comparison",
@@ -536,7 +572,8 @@ def main() -> None:
         output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else _default_output_dir(input_path)
         data = _load_npz(input_path)
 
-        if not (args.save_logk_paths or args.save_head_velocity or args.save_travel_time or args.save_computation_time):
+        if not (args.save_logk_paths or args.save_head_velocity or args.save_travel_time
+                or args.save_computation_time or args.save_first_arrival_plume):
             raise ValueError("At least one per-file figure must be enabled for --input mode.")
 
         if args.save_logk_paths:
@@ -562,6 +599,15 @@ def main() -> None:
             path = output_dir / f"computation_time_profiles.{args.format}"
             _save_figure(fig, path, args.dpi)
             saved_paths.append(path)
+
+        if args.save_first_arrival_plume:
+            if "plume_x" not in data:
+                print("[warn] plume_x not found in data; skipping first-arrival-plume figure")
+            else:
+                fig = plot_first_arrival_plume(data, path_linewidth=args.path_linewidth)
+                path = output_dir / f"first_arrival_plume.{args.format}"
+                _save_figure(fig, path, args.dpi)
+                saved_paths.append(path)
     else:
         for flag in per_file_flags:
             if not _flag_was_explicitly_set(argv, flag):
@@ -569,7 +615,7 @@ def main() -> None:
         input_dir = Path(args.input_dir).expanduser().resolve()
         if not input_dir.is_dir():
             raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
-        if args.save_logk_paths or args.save_head_velocity or args.save_travel_time or args.save_computation_time:
+        if args.save_logk_paths or args.save_head_velocity or args.save_travel_time or args.save_computation_time or args.save_first_arrival_plume:
             raise ValueError("Per-file figures require --input. Use only comparison flags with --input-dir.")
         if not (args.save_travel_time_comparison or args.save_computation_time_comparison):
             raise ValueError("At least one aggregate comparison figure must be enabled for --input-dir mode.")

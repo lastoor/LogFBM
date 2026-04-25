@@ -96,6 +96,7 @@ class VisualizationConfig:
     save_head_velocity: bool
     save_travel_time: bool
     save_computation_time: bool
+    save_first_arrival_plume: bool
 
 
 def _add_search_path(path: Path) -> None:
@@ -937,6 +938,64 @@ def _run_particle_tracking(
     return np.asarray(fp, dtype=float), np.asarray(vx, dtype=float), np.asarray(vy, dtype=float)
 
 
+def _compute_first_arrival_plume(
+    *,
+    sim_hyd: Any,
+    sim_pt: Any,
+    k_field: np.ndarray,
+    h_field: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    geometry: Geometry,
+    align_with_modflow: bool,
+    n_particles: int,
+    max_steps: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    vx_face, vy_face = sim_hyd.compute_velocity(
+        k_field,
+        x,
+        y,
+        h_field,
+        output_location="face",
+        align_with_modflow=align_with_modflow,
+        face_output="full",
+    )
+    seeds_x = np.full(n_particles, float(geometry.source_x), np.float32)
+    seeds_y = np.linspace(
+        float(geometry.source_y_start),
+        float(geometry.source_y_end),
+        n_particles,
+        endpoint=False,
+        dtype=np.float32,
+    )
+    params: dict[str, Any] = {
+        "method": "pollock",
+        "backend": "gpu",
+        "tracking_mode": "arrival",
+        "stop_mode": "first",
+        "save_trajectories": False,
+        "return_fastest": False,
+        "snapshot_mode": "fraction_of_first_arrival",
+        "snapshot_times": [1.0],
+        "x_faces": build_face_coordinates_from_centers(x).astype(np.float32),
+        "y_faces": build_face_coordinates_from_centers(y).astype(np.float32),
+        "vx": vx_face,
+        "vy": vy_face,
+        "seeds_x": seeds_x,
+        "seeds_y": seeds_y,
+        "right_x": float(geometry.target_x),
+        "max_points": 2000,
+        "max_steps": max_steps,
+    }
+    summary = sim_pt.particle_tracking_summary(params)
+    snaps = summary.get("snapshots")
+    if snaps is None:
+        return np.full(n_particles, np.nan), np.full(n_particles, np.nan)
+    snap_x = np.asarray(snaps["x"], dtype=float)
+    snap_y = np.asarray(snaps["y"], dtype=float)
+    return snap_x[:, 0].copy(), snap_y[:, 0].copy()
+
+
 def compute_cumulative_travel_time(path_xy, vx_field, vy_field, x_coords, y_coords):
     path_xy = np.asarray(path_xy, dtype=float)
     vx_field = np.asarray(vx_field, dtype=float)
@@ -990,6 +1049,7 @@ def _run_visualization(
     save_head_velocity: bool,
     save_travel_time: bool,
     save_computation_time: bool,
+    save_first_arrival_plume: bool,
 ) -> None:
     viz_script = Path(__file__).resolve().parent / "visualize_lrp_fp.py"
     if not viz_script.is_file():
@@ -1015,6 +1075,7 @@ def _run_visualization(
     cmd.append("--save-head-velocity" if save_head_velocity else "--no-save-head-velocity")
     cmd.append("--save-travel-time" if save_travel_time else "--no-save-travel-time")
     cmd.append("--save-computation-time" if save_computation_time else "--no-save-computation-time")
+    cmd.append("--save-first-arrival-plume" if save_first_arrival_plume else "--no-save-first-arrival-plume")
     subprocess.run(cmd, check=True)
 
 
@@ -1067,6 +1128,8 @@ def _write_output(
     fp_total_time_sec: float,
     lrp_total_time_sec: float,
     geometry: Geometry,
+    plume_x: np.ndarray,
+    plume_y: np.ndarray,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(
@@ -1102,6 +1165,8 @@ def _write_output(
         target_x=np.array(geometry.target_x),
         source_y_start=np.array(geometry.source_y_start),
         source_y_end=np.array(geometry.source_y_end),
+        plume_x=plume_x,
+        plume_y=plume_y,
     )
 
 
@@ -1222,6 +1287,24 @@ def _run_single_seed(
     fp_arc_length, fp_travel_time = compute_cumulative_travel_time(fp, vx_cell, vy_cell, x, y)
     lrp_arc_length, lrp_pseudo_travel_time = compute_cumulative_travel_time(lrp, vx_cell, vy_cell, x, y)
 
+    plume_x, plume_y = _compute_first_arrival_plume(
+        sim_hyd=sim_hyd,
+        sim_pt=sim_pt,
+        k_field=k_field,
+        h_field=h,
+        x=x,
+        y=y,
+        geometry=geometry,
+        align_with_modflow=config.align_with_modflow,
+        n_particles=_resolve_particle_count(
+            num_particles=config.num_particles,
+            density_particle=config.density_particle,
+            y0=geometry.source_y_start,
+            y1=geometry.source_y_end,
+        ),
+        max_steps=config.max_iters,
+    )
+
     output_path = output_path.expanduser().resolve()
     _write_output(
         output_path=output_path,
@@ -1253,6 +1336,8 @@ def _run_single_seed(
         fp_total_time_sec=fp_total_time_sec,
         lrp_total_time_sec=lrp_total_time_sec,
         geometry=geometry,
+        plume_x=plume_x,
+        plume_y=plume_y,
     )
     if visualize_cfg.enabled:
         _run_visualization(
@@ -1266,6 +1351,7 @@ def _run_single_seed(
             save_head_velocity=visualize_cfg.save_head_velocity,
             save_travel_time=visualize_cfg.save_travel_time,
             save_computation_time=visualize_cfg.save_computation_time,
+            save_first_arrival_plume=visualize_cfg.save_first_arrival_plume,
         )
     return output_path
 
@@ -1514,7 +1600,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--velocity-location", choices=("cell", "face"), default="cell")
     parser.add_argument("--align-with-modflow", action="store_true", default=False)
     parser.add_argument("--density-particle", type=int, default=2)
-    parser.add_argument("--num-particles", type=int, default=None)
+    parser.add_argument("--num-particles", type=int, default=1000000)
     parser.add_argument("--eps-speed", type=float, default=1e-12)
     parser.add_argument("--ds-min", type=float, default=0.05)
     parser.add_argument("--ds-max", type=float, default=0.5)
@@ -1539,6 +1625,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--visualize-head-velocity", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--visualize-travel-time", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--visualize-computation-time", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--visualize-first-arrival-plume", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args()
 
 
@@ -1612,6 +1699,7 @@ def main() -> None:
         save_head_velocity=bool(args.visualize_head_velocity),
         save_travel_time=bool(args.visualize_travel_time),
         save_computation_time=bool(args.visualize_computation_time),
+        save_first_arrival_plume=bool(args.visualize_first_arrival_plume),
     )
 
     if batch_seeds:
