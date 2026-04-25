@@ -12,16 +12,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 from matplotlib.ticker import LogFormatterMathtext, LogLocator, MultipleLocator
+from matplotlib.colors import LogNorm
+import cmcrameri.cm as cmc
 import numpy as np
 
 
 COLORS = {
-    "fp": "black",
-    "lrp": "#F9B43F",
-    "source_target": "purple",
+    "fp": "white",
+    "lrp": "white",
+    "source_target": "#00F0FF",
 }
 
-PATH_EFFECTS = [pe.Stroke(linewidth=3.0, foreground="white"), pe.Normal()]
+PATH_EFFECTS = [pe.Stroke(linewidth=3.0, foreground="black"), pe.Normal()]
 
 def configure_style():
     import glob
@@ -119,46 +121,60 @@ def _add_path_overlays(
     target_xy: np.ndarray,
     linewidth: float,
 ) -> None:
-    ax.plot(
+    line, = ax.plot(
         source_xy[:, 0],
         source_xy[:, 1],
         color=COLORS["source_target"],
         linewidth=linewidth,
-        linestyle="-",
+        linestyle="--",
         label="Source",
-        path_effects=PATH_EFFECTS,
         zorder=4,
+        alpha=1,
     )
-    ax.plot(
+    line.set_path_effects(PATH_EFFECTS)
+    line.set_solid_capstyle("round")
+    line.set_dash_capstyle("round")
+
+    line, = ax.plot(
         target_xy[:, 0],
         target_xy[:, 1],
         color=COLORS["source_target"],
         linewidth=linewidth,
-        linestyle="-",
+        linestyle="-.",
         label="Target",
-        path_effects=PATH_EFFECTS,
         zorder=4,
+        alpha=1,
     )
-    ax.plot(
+    line.set_path_effects(PATH_EFFECTS)
+    line.set_solid_capstyle("round")
+    line.set_dash_capstyle("round")
+
+    line, = ax.plot(
         fp[:, 0],
         fp[:, 1],
         color=COLORS["fp"],
         linewidth=linewidth,
         linestyle="-",
         label="FP",
-        path_effects=PATH_EFFECTS,
         zorder=5,
     )
-    ax.plot(
+    line.set_path_effects(PATH_EFFECTS)
+    line.set_solid_capstyle("round")
+    line.set_dash_capstyle("round")
+
+    line, = ax.plot(
         lrp[:, 0],
         lrp[:, 1],
         color=COLORS["lrp"],
         linewidth=linewidth,
-        linestyle="-.",
+        linestyle=":",
         label="LRP",
         path_effects=PATH_EFFECTS,
         zorder=5,
     )
+    line.set_path_effects(PATH_EFFECTS)
+    line.set_solid_capstyle("round")
+    line.set_dash_capstyle("round")
 
 
 def plot_logk_paths(data: dict[str, np.ndarray], *, path_linewidth: float) -> plt.Figure:
@@ -171,7 +187,7 @@ def plot_logk_paths(data: dict[str, np.ndarray], *, path_linewidth: float) -> pl
     source_xy, target_xy = _build_geometry(data)
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(logk, origin="lower", cmap="viridis", interpolation="nearest", extent=_extent(x, y))
+    im = ax.imshow(logk, origin="lower", cmap=cmc.batlowW_r, interpolation="nearest", extent=_extent(x, y))
     _add_path_overlays(ax, fp=fp, lrp=lrp, source_xy=source_xy, target_xy=target_xy, linewidth=path_linewidth)
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.set_label("log K")
@@ -195,7 +211,7 @@ def plot_head_velocity(data: dict[str, np.ndarray], *, path_linewidth: float, st
     source_xy, target_xy = _build_geometry(data)
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(speed, origin="lower", cmap="magma", interpolation="nearest", extent=_extent(x, y))
+    im = ax.imshow(speed, origin="lower", cmap=cmc.batlowW_r, interpolation="nearest", extent=_extent(x, y))
     ax.streamplot(x, y, vx, vy, color=(0.0, 0.0, 0.0, 0.35), linewidth=0.8, density=stream_density, arrowsize=0.7)
     _add_path_overlays(ax, fp=fp, lrp=lrp, source_xy=source_xy, target_xy=target_xy, linewidth=path_linewidth)
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -462,16 +478,20 @@ def plot_computation_time_comparison(
     return results
 
 
-def plot_first_arrival_plume(data: dict[str, np.ndarray], *, path_linewidth: float) -> plt.Figure:
+def plot_first_arrival_plume(
+    data: dict[str, np.ndarray], *, path_linewidth: float, stream_density: float
+) -> plt.Figure:
     _require_keys(
         data,
-        ["x", "y", "logk", "fp", "lrp", "plume_x", "plume_y",
+        ["x", "y", "logk", "vx", "vy", "fp", "lrp", "plume_x", "plume_y",
          "source_x", "target_x", "source_y_start", "source_y_end"],
         "first_arrival_plume",
     )
     x = np.asarray(data["x"], dtype=float)
     y = np.asarray(data["y"], dtype=float)
     logk = np.asarray(data["logk"], dtype=float)
+    vx = np.asarray(data["vx"], dtype=float)
+    vy = np.asarray(data["vy"], dtype=float)
     plume_x = np.asarray(data["plume_x"], dtype=float).ravel()
     plume_y = np.asarray(data["plume_y"], dtype=float).ravel()
     fp = _validate_path(data["fp"], "fp")
@@ -480,16 +500,36 @@ def plot_first_arrival_plume(data: dict[str, np.ndarray], *, path_linewidth: flo
     mask = np.isfinite(plume_x) & np.isfinite(plume_y)
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.imshow(logk, origin="lower", cmap="viridis", interpolation="nearest",
-              extent=_extent(x, y), alpha=0.7)
-    ax.scatter(plume_x[mask], plume_y[mask], s=6, color="white",
-               linewidths=0, rasterized=True, label="Plume", zorder=3)
+    ax.imshow(np.exp(logk), norm=LogNorm(), origin="lower", cmap=cmc.batlowW_r, interpolation="nearest",
+              extent=_extent(x, y))
+    cbar = fig.colorbar(ax.images[0], ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label(r"$K$")
+    cbar.locator = LogLocator(base=10)
+    cbar.formatter = LogFormatterMathtext(base=10)
+    cbar.update_ticks()
+
+    ax.streamplot(
+        x,
+        y,
+        vx,
+        vy,
+        color='#222222',
+        linewidth=0.8,
+        density=stream_density,
+        arrowsize=0.5,
+        zorder=2
+    )
+    line, = ax.plot(plume_x[mask], plume_y[mask], color="#00F0FF",
+               linewidth=2, label="Plume", zorder=3, alpha=1)
+    line.set_path_effects([pe.Stroke(linewidth=3.0, foreground="black"), pe.Normal()])
+    line.set_solid_capstyle("round")
+    line.set_dash_capstyle("round")
     _add_path_overlays(ax, fp=fp, lrp=lrp, source_xy=source_xy,
                        target_xy=target_xy, linewidth=path_linewidth)
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_title("FP First Arrival Plume")
-    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    ax.set_xlabel(r"$x / \delta$")
+    ax.set_ylabel(r"$y / \delta$")
+    # ax.set_title("FP First Arrival Plume")
+    ax.legend(loc="lower left", facecolor="white", edgecolor="black", framealpha=0.7)
     fig.tight_layout()
     return fig
 
@@ -604,7 +644,11 @@ def main() -> None:
             if "plume_x" not in data:
                 print("[warn] plume_x not found in data; skipping first-arrival-plume figure")
             else:
-                fig = plot_first_arrival_plume(data, path_linewidth=args.path_linewidth)
+                fig = plot_first_arrival_plume(
+                    data,
+                    path_linewidth=args.path_linewidth,
+                    stream_density=args.stream_density,
+                )
                 path = output_dir / f"first_arrival_plume.{args.format}"
                 _save_figure(fig, path, args.dpi)
                 saved_paths.append(path)
