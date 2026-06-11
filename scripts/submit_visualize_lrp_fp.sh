@@ -9,8 +9,8 @@ set -euo pipefail
 #                  computation_time_comparison)
 # ---------------------------------------------------------------------------
 input_file=""
-input_dir="/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto"
-output_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto"
+input_dir="/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.5_stdauto"
+output_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.5_stdauto"
 log_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/slurm_logs"
 
 dpi="300"
@@ -31,9 +31,9 @@ computation_time_comparison_style="histogram"   # Options: scatter, histogram, b
 computation_time_comparison_components="self" # Options: self, total, both
 
 run_tag="visualize_lrp_fp"
-time="00:01:00"
+time="00:10:00"
 cpus_per_task="2"
-mem_per_cpu="2GB"
+mem_per_cpu="8GB"
 
 account="fbarros_324"
 partition="main"

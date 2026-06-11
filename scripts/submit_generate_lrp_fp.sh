@@ -2,10 +2,10 @@
 set -euo pipefail
 
 field_type="fbm"           # Options: expcov, fbm
-field_size="1000"
+field_size="100"
 std=""
 length_scale="0.2"         # Used for expcov
-fbm_alpha="0.1"            # Used for fbm
+fbm_alpha="0.2"            # Used for fbm
 fbm_c="0.027"                   # Optional fBm c override; leave empty to auto-derive from alpha/std
 num_mc="1000"
 seed_start="2026"

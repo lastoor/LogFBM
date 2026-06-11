@@ -11,7 +11,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
-from matplotlib.ticker import LogFormatterMathtext, LogLocator, MultipleLocator
+from matplotlib.ticker import LogFormatterMathtext, LogLocator
 from matplotlib.colors import LogNorm
 import cmcrameri.cm as cmc
 import numpy as np
@@ -60,6 +60,29 @@ def _load_npz_dir(path: Path) -> list[tuple[Path, dict[str, np.ndarray]]]:
     if not npz_paths:
         raise FileNotFoundError(f"No .npz files found in input directory: {path}")
     return [(npz_path, _load_npz(npz_path)) for npz_path in npz_paths]
+
+
+_COMPARISON_KEYS = (
+    "fp_travel_time",
+    "lrp_pseudo_travel_time",
+    "dh",
+    "fp_compute_time_sec",
+    "lrp_compute_time_sec",
+    "fp_total_time_sec",
+    "lrp_total_time_sec",
+)
+
+
+def _load_npz_keys(path: Path, keys: tuple[str, ...]) -> dict[str, np.ndarray]:
+    with np.load(path, allow_pickle=True) as data:
+        return {key: data[key] for key in keys if key in data.files}
+
+
+def _load_comparison_dataset(path: Path) -> list[tuple[Path, dict[str, np.ndarray]]]:
+    npz_paths = sorted(child for child in path.iterdir() if child.is_file() and child.suffix == ".npz")
+    if not npz_paths:
+        raise FileNotFoundError(f"No .npz files found in input directory: {path}")
+    return [(npz_path, _load_npz_keys(npz_path, _COMPARISON_KEYS)) for npz_path in npz_paths]
 
 
 def _require_keys(data: dict[str, np.ndarray], keys: list[str], context: str) -> None:
@@ -254,6 +277,7 @@ def plot_travel_time_profiles(data: dict[str, np.ndarray]) -> plt.Figure:
 def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]]) -> plt.Figure:
     x_values: list[float] = []
     y_values: list[float] = []
+    skipped = 0
     for npz_path, data in dataset:
         _require_keys(data, ["fp_travel_time", "lrp_pseudo_travel_time", "dh"], f"travel_time_comparison ({npz_path.name})")
         fp_t = np.asarray(data["fp_travel_time"], dtype=float)
@@ -263,29 +287,47 @@ def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]
         t_ref = abs(float(_scalar(data, "dh")))
         if not np.isfinite(t_ref) or t_ref <= 0.0:
             raise ValueError(f"Dimensionless travel-time reference |dh| must be finite and positive in {npz_path}")
-        x_values.append(float(fp_t[-1]) / t_ref)
-        y_values.append(float(lrp_t[-1]) / t_ref)
+        x_val = float(fp_t[-1]) / t_ref
+        y_val = float(lrp_t[-1]) / t_ref
+        if not np.isfinite(x_val) or not np.isfinite(y_val) or x_val <= 0.0 or y_val <= 0.0:
+            skipped += 1
+            continue
+        x_values.append(x_val)
+        y_values.append(y_val)
+
+    if skipped:
+        print(
+            f"[warn] skipped {skipped} non-finite/non-positive travel-time points out of {len(dataset)} files",
+            file=sys.stderr,
+        )
+    if not x_values:
+        raise ValueError("No finite positive travel-time points available for comparison plot.")
 
     x_arr = np.asarray(x_values, dtype=float)
     y_arr = np.asarray(y_values, dtype=float)
-    xy_min = float(np.nanmin([np.nanmin(x_arr), np.nanmin(y_arr)]))
-    xy_max = float(np.nanmax([np.nanmax(x_arr), np.nanmax(y_arr)]))
+    xy_min = float(min(np.min(x_arr), np.min(y_arr)))
+    xy_max = float(max(np.max(x_arr), np.max(y_arr)))
+    lim_min = xy_min * 0.9
+    lim_max = xy_max * 1.1
 
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
-    ax.scatter(x_arr, y_arr, color="#444444", s=36, alpha=0.5, linewidths=0) #, label=f"{len(dataset)} files")
-    ax.plot([xy_min, xy_max], [xy_min, xy_max], color="0.4", linestyle="--", linewidth=1.2) #, label="$y = x$")
+    ax.scatter(x_arr, y_arr, color="#444444", s=36, alpha=0.5, linewidths=0)
+    ax.plot([lim_min, lim_max], [lim_min, lim_max], color="0.4", linestyle="--", linewidth=1.2)
     ax.set_xlabel(r"$t_{\min}^{\text{FP}} / t_{\text{ref}}$")
     ax.set_ylabel(r"$t_{\min}^{\text{LRP}} / t_{\text{ref}}$")
-    # ax.set_title("First Arrival-Time Comparison")
-    ax.grid(True, alpha=0.25)
-    # ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
-    ax.set_xlim(xy_min, xy_max)
-    ax.set_ylim(xy_min, xy_max)
-    ax.xaxis.set_major_locator(MultipleLocator(25))
-    ax.yaxis.set_major_locator(MultipleLocator(25))
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(lim_min, lim_max)
+    ax.set_ylim(lim_min, lim_max)
+    ax.xaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
+    ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+    ax.xaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
+    ax.yaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
+    ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+    ax.yaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
+    ax.grid(True, which="major", alpha=0.8)
+    # ax.grid(True, which="minor", alpha=0.6)
     ax.set_aspect("equal", adjustable="box")
-    # ax.set_xscale("log")
-    # ax.set_yscale("log")
     fig.tight_layout()
     return fig
 
@@ -665,7 +707,7 @@ def main() -> None:
             raise ValueError("At least one aggregate comparison figure must be enabled for --input-dir mode.")
 
         output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else _default_output_dir_for_dir(input_dir)
-        dataset = _load_npz_dir(input_dir)
+        dataset = _load_comparison_dataset(input_dir)
 
         if args.save_travel_time_comparison:
             fig = plot_travel_time_comparison(dataset)
