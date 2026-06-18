@@ -5,12 +5,12 @@ set -euo pipefail
 # Input mode: set exactly one of input_file or input_dir.
 #   input_file  -> per-file figures (logk_paths, head_velocity, travel_time,
 #                  computation_time)
-#   input_dir   -> aggregate comparison figures (travel_time_comparison,
-#                  computation_time_comparison)
+#   input_dir   -> aggregate comparison figures (travel_time_comparison scatter
+#                  and/or histogram, computation_time_comparison)
 # ---------------------------------------------------------------------------
 input_file=""
-input_dir="/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.5_stdauto"
-output_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.5_stdauto"
+input_dir="/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto"
+output_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto"
 log_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/slurm_logs"
 
 dpi="300"
@@ -26,6 +26,7 @@ save_computation_time="true"
 
 # Aggregate figure toggles (only used with input_dir)
 save_travel_time_comparison="true"
+travel_time_comparison_style="both"        # Options: scatter, histogram, both
 save_computation_time_comparison="true"
 computation_time_comparison_style="histogram"   # Options: scatter, histogram, both
 computation_time_comparison_components="self" # Options: self, total, both
@@ -102,6 +103,7 @@ aggregate_args=""
 if [[ "${mode}" == "dir" ]]; then
     if [[ "${save_travel_time_comparison}" == "true" ]]; then
         aggregate_args+=" --save-travel-time-comparison"
+        aggregate_args+=" --travel-time-comparison-style ${travel_time_comparison_style}"
     else
         aggregate_args+=" --no-save-travel-time-comparison"
     fi

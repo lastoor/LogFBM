@@ -25,6 +25,25 @@ COLORS = {
 
 PATH_EFFECTS = [pe.Stroke(linewidth=3.0, foreground="black"), pe.Normal()]
 
+TRAVEL_TIME_RATIO_HIST_XLIM = (1.0 / 3.0, 1.0 / 0.7)
+TRAVEL_TIME_RATIO_HIST_NUM_BINS = 50
+
+COMPUTE_TIME_RATIO_HIST_XLIM = (1.0 / 1_000.0, 10**0.1)
+COMPUTE_TIME_RATIO_HIST_NUM_BINS = 50
+
+
+def _histogram_bins_from_xlim(
+    xlim: tuple[float, float],
+    num_bins: int,
+    *,
+    log_scale: bool = False,
+) -> np.ndarray:
+    lo, hi = xlim
+    if log_scale:
+        return np.logspace(np.log10(lo), np.log10(hi), num_bins + 1)
+    return np.linspace(lo, hi, num_bins + 1)
+
+
 def configure_style():
     import glob
     import matplotlib.font_manager as fm
@@ -268,13 +287,15 @@ def plot_travel_time_profiles(data: dict[str, np.ndarray]) -> plt.Figure:
     ax.set_xlabel("Arc length")
     ax.set_ylabel("Cumulative travel time")
     ax.set_title("Travel-Time Profiles Along Paths")
-    ax.grid(True, alpha=0.25)
+    # ax.grid(True, alpha=0.25)
     ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
     fig.tight_layout()
     return fig
 
 
-def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]]) -> plt.Figure:
+def _collect_travel_time_points(
+    dataset: list[tuple[Path, dict[str, np.ndarray]]],
+) -> tuple[np.ndarray, np.ndarray, int]:
     x_values: list[float] = []
     y_values: list[float] = []
     skipped = 0
@@ -303,12 +324,16 @@ def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]
     if not x_values:
         raise ValueError("No finite positive travel-time points available for comparison plot.")
 
-    x_arr = np.asarray(x_values, dtype=float)
-    y_arr = np.asarray(y_values, dtype=float)
+    return np.asarray(x_values, dtype=float), np.asarray(y_values, dtype=float), skipped
+
+
+def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]]) -> plt.Figure:
+    x_arr, y_arr, _skipped = _collect_travel_time_points(dataset)
     xy_min = float(min(np.min(x_arr), np.min(y_arr)))
     xy_max = float(max(np.max(x_arr), np.max(y_arr)))
     lim_min = xy_min * 0.9
     lim_max = xy_max * 1.1
+    xlim = TRAVEL_TIME_RATIO_HIST_XLIM
 
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
     ax.scatter(x_arr, y_arr, color="#444444", s=36, alpha=0.5, linewidths=0)
@@ -317,19 +342,72 @@ def plot_travel_time_comparison(dataset: list[tuple[Path, dict[str, np.ndarray]]
     ax.set_ylabel(r"$t_{\min}^{\text{LRP}} / t_{\text{ref}}$")
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlim(lim_min, lim_max)
+    ax.set_xlim(*xlim)
     ax.set_ylim(lim_min, lim_max)
-    ax.xaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
-    ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
-    ax.xaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
-    ax.yaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
-    ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
-    ax.yaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
-    ax.grid(True, which="major", alpha=0.8)
+    # ax.xaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
+    # ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+    # ax.xaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
+    # ax.yaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
+    # ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+    # ax.yaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
+    # ax.grid(True, which="major", alpha=0.8)
     # ax.grid(True, which="minor", alpha=0.6)
     ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
     return fig
+
+
+def plot_travel_time_ratio_histogram(dataset: list[tuple[Path, dict[str, np.ndarray]]]) -> plt.Figure:
+    x_arr, y_arr, _skipped = _collect_travel_time_points(dataset)
+    ratios = y_arr / x_arr
+
+    xlim = TRAVEL_TIME_RATIO_HIST_XLIM
+    bins = _histogram_bins_from_xlim(xlim, TRAVEL_TIME_RATIO_HIST_NUM_BINS)
+
+    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+    weights = np.ones_like(ratios, dtype=float) / ratios.size
+    ax.hist(
+        ratios,
+        bins=bins,
+        weights=weights,
+        color="#444444",
+        alpha=0.6,
+        edgecolor="#444444",
+        linewidth=0,
+    )
+    mean_ratio = float(np.mean(ratios))
+    ax.axvline(mean_ratio, color="#000000", linestyle="--", linewidth=2.0, label=f"Mean: {mean_ratio:.3g}")
+    ax.set_xlabel(r"$t_{\min}^{\text{LRP}} / t_{\min}^{\text{FP}}$")
+    ax.set_ylabel("Frequency")
+    ax.set_xlim(*xlim)
+    # ax.set_xscale("log")
+    # ax.xaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
+    # ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+    # ax.xaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
+    # ax.grid(True, which="major", alpha=0.8)
+    # ax.grid(True, which="minor", alpha=0.6)
+    # ax.grid(True)
+    ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
+    fig.tight_layout()
+    return fig
+
+
+def plot_travel_time_comparison_figures(
+    dataset: list[tuple[Path, dict[str, np.ndarray]]],
+    *,
+    style: str = "scatter",
+) -> list[tuple[str, plt.Figure]]:
+    """Return a list of (stem_suffix, figure) pairs (one per style requested)."""
+    styles = ("scatter", "histogram") if style == "both" else (style,)
+    results: list[tuple[str, plt.Figure]] = []
+    for s in styles:
+        suffix = f"_{s}" if style == "both" else ""
+        if s == "histogram":
+            fig = plot_travel_time_ratio_histogram(dataset)
+        else:
+            fig = plot_travel_time_comparison(dataset)
+        results.append((suffix, fig))
+    return results
 
 
 def plot_computation_time_profiles(data: dict[str, np.ndarray]) -> plt.Figure:
@@ -385,7 +463,7 @@ def plot_computation_time_profiles(data: dict[str, np.ndarray]) -> plt.Figure:
 
     ax.set_ylabel("Computation time (s)")
     ax.set_title("Computation Time Comparison")
-    ax.grid(True, axis="y", alpha=0.25)
+    # ax.grid(True, axis="y", alpha=0.25)
     ax.set_axisbelow(True)
     ax.text(
         0.02,
@@ -448,7 +526,7 @@ def plot_computation_time_comparison_scatter(
     ax.plot([0.0, line_max], [0.0, line_max], color="0.4", linestyle="--", linewidth=1.2, label="y = x")
     ax.set_xlabel(r"$t_{\text{compute}}^{\text{FP}}$ (s)")
     ax.set_ylabel(r"$t_{\text{compute}}^{\text{LRP}}$ (s)")
-    ax.grid(True, alpha=0.25)
+    # ax.grid(True, alpha=0.25)
     ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -471,8 +549,8 @@ def plot_computation_time_comparison_histogram(
         ratios = np.asarray(y_total, dtype=float) / np.asarray(x_total, dtype=float)
         series.append((ratios, "#111111", rf"With velocity field solving ($\mu={np.mean(ratios):.3g}$)"))
 
-    all_ratios = np.concatenate([s[0] for s in series])
-    bins = np.logspace(np.log10(np.nanmin(all_ratios) * 0.9), np.log10(np.nanmax(all_ratios) * 1.1), 30)
+    xlim = COMPUTE_TIME_RATIO_HIST_XLIM
+    bins = _histogram_bins_from_xlim(xlim, COMPUTE_TIME_RATIO_HIST_NUM_BINS, log_scale=True)
 
     fig, ax = plt.subplots(figsize=(5.5, 5.5))
     for ratios_arr, color, label in series:
@@ -491,11 +569,12 @@ def plot_computation_time_comparison_histogram(
     ax.set_xlabel(r"$t_{\text{compute}}^{\text{LRP}} / t_{\text{compute}}^{\text{FP}}$")
     ax.set_ylabel("Frequency")
     ax.set_xscale("log")
-    ax.xaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
-    ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
-    ax.xaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
-    ax.grid(True, which="major", alpha=0.8)
-    ax.grid(True, which="minor", alpha=0.6)
+    ax.set_xlim(*xlim)
+    # ax.xaxis.set_major_locator(LogLocator(base=10.0, numticks=12))
+    # ax.xaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2, 10) * 0.1, numticks=100))
+    # ax.xaxis.set_major_formatter(LogFormatterMathtext(base=10.0))
+    # ax.grid(True, which="major", alpha=0.8)
+    # ax.grid(True, which="minor", alpha=0.6)
     ax.legend(loc="best", facecolor="white", edgecolor="black", framealpha=1.0)
     fig.tight_layout()
     return fig
@@ -612,6 +691,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-travel-time-comparison", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--save-computation-time-comparison", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
+        "--travel-time-comparison-style",
+        choices=("scatter", "histogram", "both"),
+        default="scatter",
+        help="Plot style for travel-time comparison: scatter (default), histogram of LRP/FP ratios, or both (saves two separate figures).",
+    )
+    parser.add_argument(
         "--computation-time-comparison-style",
         choices=("scatter", "histogram", "both"),
         default="scatter",
@@ -710,10 +795,13 @@ def main() -> None:
         dataset = _load_comparison_dataset(input_dir)
 
         if args.save_travel_time_comparison:
-            fig = plot_travel_time_comparison(dataset)
-            path = output_dir / f"travel_time_comparison.{args.format}"
-            _save_figure(fig, path, args.dpi)
-            saved_paths.append(path)
+            for suffix, fig in plot_travel_time_comparison_figures(
+                dataset,
+                style=args.travel_time_comparison_style,
+            ):
+                path = output_dir / f"travel_time_comparison{suffix}.{args.format}"
+                _save_figure(fig, path, args.dpi)
+                saved_paths.append(path)
 
         if args.save_computation_time_comparison:
             for suffix, fig in plot_computation_time_comparison(
