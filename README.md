@@ -154,8 +154,8 @@ Computation-time definitions:
 Aggregate comparison figures:
 
 - `python scripts/visualize_lrp_fp.py --input-dir <dir>` scans all `.npz` files directly inside the directory
-- `travel_time_comparison` can be a scatter plot with one point per `.npz`, using final dimensionless travel times `t_FP / t_ref` versus `t_LRP / t_ref`, where `t_ref = |dh|` is derived from each `.npz`, or a histogram of `t_min^LRP / t_min^FP` with a mean marker
-- `computation_time_comparison` can be a scatter plot with one point per `.npz` for exclusive timing and one point per `.npz` for inclusive timing, with a `y=x` reference line and aggregate mean-ratio annotations `mean(t_LRP)/mean(t_FP)` for both timing definitions, or a histogram of `t_compute^LRP / t_compute^FP` with a mean marker
+- `travel_time_comparison` can be a scatter plot with one point per `.npz`, using final dimensionless travel times `t_FP / t_ref` versus `t_LRP / t_ref`, where `t_ref = |dh|` is derived from each `.npz`, or a histogram of `t_min^FP / t_min^LRP` with a mean marker
+- `computation_time_comparison` can be a scatter plot with one point per `.npz` for exclusive timing and one point per `.npz` for inclusive timing, with a `y=x` reference line and aggregate mean-ratio annotations `mean(t_LRP)/mean(t_FP)` for both timing definitions, or a histogram of `t_compute^FP / t_compute^LRP` with a mean marker
 
 ## Visualization Options
 

@@ -8,9 +8,9 @@ set -euo pipefail
 #   input_dir   -> aggregate comparison figures (travel_time_comparison scatter
 #                  and/or histogram, computation_time_comparison)
 # ---------------------------------------------------------------------------
-input_file=""
-input_dir="/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto"
-output_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.1_stdauto"
+input_file="/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.5_stdauto/fbm_size100_seed2040_alpha0.5_std1.0.npz"
+input_dir="" #"/project2/fbarros_324/binhaoli/task7_lrp_fp/Run3_computation_time/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha1.5_stdauto"
+output_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/fbm_size100_mc1000_seedstart2026_alpha0.5_stdauto"
 log_dir="/home1/binhaoli/LogFBM/outputs/generate_lrp_fp/slurm_logs"
 
 dpi="300"
